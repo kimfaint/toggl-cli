@@ -364,6 +364,39 @@ class ClientList(object):
             self.iter_index += 1
             return self.client_list[self.iter_index-1]
 
+    def find_by_name(self, client_name, workspace_name=''):
+        """
+        Check if client exists in workspace
+        """
+        workspace = WorkspaceList().find_by_name(workspace_name)
+        if(workspace):
+            for client in self.client_list:
+                if client['name'] == client_name and client['wid'] == workspace['id']:
+                    return client
+        return None
+
+    def find_by_id(self, cid, workspace_name=''):
+        """
+        Check if client exists in workspace
+        """
+        workspace = WorkspaceList().find_by_name(workspace_name)
+        if(workspace):
+            for client in self.client_list:
+                if client['id'] == cid and client['wid'] == workspace['id']:
+                    return client
+        return None
+
+    def add(self, client_name, workspace_name):
+        """
+        Adds a new client to workspace. 
+        """
+        workspace = WorkspaceList().find_by_name(workspace_name)
+        if(workspace):
+            wid = workspace['id']
+            data = {'client':{ 'name': client_name, 'wid': wid }}
+            toggl("%s/clients" % TOGGL_URL, "post", json.dumps(data))
+            self.__init__()
+
     def __str__(self):
         """
         Formats the list of clients as a string.
@@ -502,6 +535,23 @@ class ProjectList(six.Iterator):
             self.iter_index += 1
             return self.project_list[self.iter_index-1]
 
+    def add(self, project_name, client_name):
+        """
+        Adds a new project for a client. 
+        """
+        client = ClientList().find_by_name(client_name, self.workspace['name'])
+        if(client):
+            wid = self.workspace['id']
+            cid = client['id']
+            data = {'project':{ 
+                        'name': project_name, 
+                        'wid': wid,
+                        'cid': cid 
+                }
+            }
+            toggl("%s/projects" % TOGGL_URL, "post", json.dumps(data))
+            self.fetch_by_wid(wid)
+
     def __str__(self):
         """Formats the project list as a string."""
         s = ""
@@ -576,6 +626,11 @@ class TimeEntry(object):
             self.data = data_dict
        
         self.data['created_with'] = 'toggl-cli'
+
+        self.localized_start_datetime = DateAndTime().parse_iso_str(self.get('start'))
+        self.workspace = WorkspaceList().find_by_id(self.data['wid'])
+        self.project = ProjectList(self.workspace['name']).find_by_id(self.data['pid'])
+        self.duration = datetime.timedelta(seconds=int(self.data['duration']))
 
     def add(self):
         """
@@ -784,10 +839,20 @@ class TimeEntryList(object):
 
     __metaclass__ = Singleton
 
-    def __init__(self):
+    def __init__(self, start_date=None, end_date=None):
         """
         Fetches time entry data from toggl.
         """
+        # Default period 00:00:00 yesterday to 23:59:59 today.
+        self.start_date = DateAndTime().start_of_yesterday()
+        self.end_date = DateAndTime().last_minute_today()
+
+        # User specified period
+        if start_date:
+            self.start_date = DateAndTime().parse_iso_str(start_date)
+        if end_date:
+            self.end_date = DateAndTime().parse_iso_str(end_date)
+
         self.reload()
         
     def __iter__(self):
@@ -841,10 +906,10 @@ class TimeEntryList(object):
         Force reloading time entry data from the server. Returns self for
         method chaining.
         """
-        # Fetch time entries from 00:00:00 yesterday to 23:59:59 today.
+        # Fetch time entries.
         url = "%s/time_entries?start_date=%s&end_date=%s" % \
-            (TOGGL_URL, urllib.parse.quote(DateAndTime().start_of_yesterday().isoformat('T')), \
-            urllib.parse.quote(DateAndTime().last_minute_today().isoformat('T')))
+            (TOGGL_URL, urllib.parse.quote(self.start_date.isoformat('T')), \
+            urllib.parse.quote(self.end_date.isoformat('T')))
         Logger.debug(url)
         entries = json.loads( toggl(url, 'get') )
 
@@ -967,6 +1032,9 @@ class CLI(object):
         self.parser.add_option("-d", "--debug",
                               action="store_true", dest="debug", default=False,
                               help="print debugging output")
+        self.parser.add_option("-s", "--start_date",
+                              action="store", type="string", dest="start_date",
+                              help="print debugging output")
 
         # self.args stores the remaining command line args.
         (options, self.args) = self.parser.parse_args()
@@ -980,6 +1048,10 @@ class CLI(object):
         if options.verbose:
             global VERBOSE 
             VERBOSE = True
+
+        self.start_date = None
+        if options.start_date:
+            self.start_date = options.start_date
 
     def _add_time_entry(self, args):
         """
@@ -1036,7 +1108,7 @@ class CLI(object):
         Performs the actions described by the list of arguments in self.args.
         """
         if len(self.args) == 0 or self.args[0] == "ls":
-            Logger.info(TimeEntryList())
+            Logger.info(TimeEntryList(start_date=self.start_date))
         elif self.args[0] == "add":
             self._add_time_entry(self.args[1:])
         elif self.args[0] == "clients":
