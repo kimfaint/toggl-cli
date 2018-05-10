@@ -552,6 +552,13 @@ class ProjectList(six.Iterator):
             toggl("%s/projects" % TOGGL_URL, "post", json.dumps(data))
             self.fetch_by_wid(wid)
 
+    def delete(self, pid):
+        """
+        Delete a project from the server.
+        """
+        url = "%s/projects/%s" % (TOGGL_URL, pid)
+        toggl(url, 'delete')
+
     def __str__(self):
         """Formats the project list as a string."""
         s = ""
