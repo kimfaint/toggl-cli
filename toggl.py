@@ -629,7 +629,10 @@ class TimeEntry(object):
 
         self.localized_start_datetime = DateAndTime().parse_iso_str(self.get('start'))
         self.workspace = WorkspaceList().find_by_id(self.data['wid'])
-        self.project = ProjectList(self.workspace['name']).find_by_id(self.data['pid'])
+        if self.data and self.data.has_key('pid'):
+            self.project = ProjectList(self.workspace['name']).find_by_id(self.data['pid'])
+        else:
+            self.project = None
         self.duration = datetime.timedelta(seconds=int(self.data['duration']))
 
     def add(self):
